@@ -1,1 +1,139 @@
-{"metadata":{"kernelspec":{"language":"python","display_name":"Python 3","name":"python3"},"language_info":{"pygments_lexer":"ipython3","nbconvert_exporter":"python","version":"3.6.4","file_extension":".py","codemirror_mode":{"name":"ipython","version":3},"name":"python","mimetype":"text/x-python"},"kaggle":{"accelerator":"none","dataSources":[{"sourceId":289311478,"sourceType":"kernelVersion"}],"dockerImageVersionId":31234,"isInternetEnabled":true,"language":"python","sourceType":"script","isGpuEnabled":false}},"nbformat_minor":4,"nbformat":4,"cells":[{"cell_type":"code","source":"import tensorflow as tf\nfrom metrics import BalancedAccuracy\n\ndef create_teacher_model(shape, augmentation=None, n_last_layers_unfreeze=None):\n    \"\"\"\n    Create the teacher model (ResNet50V2).\n    Args:\n        shape: input shape\n        augmentation: tf.keras.Sequential with transformation layers\n        n_last_layers_unfreeze: number of layers to unfreeze and enable training\n    Return:\n        model: teacher model \n    \"\"\"\n    \n    base_model = tf.keras.applications.ResNet50V2(\n      include_top = False,\n      weights = 'imagenet',\n      input_shape = shape\n    )\n    base_model.trainable = False\n\n    inputs = tf.keras.Input(shape=shape)\n    if augmentation is not None:\n        x = augmentation(inputs)\n    else:\n        x = inputs\n    preprocess = tf.keras.applications.resnet_v2.preprocess_input(x)\n    x = base_model(preprocess, training = False)\n    x = tf.keras.layers.GlobalAveragePooling2D()(x)\n    output = tf.keras.layers.Dense(2)(x)\n    model = tf.keras.Model(inputs, output)\n    \n    if n_last_layers_unfreeze is not None:\n        if n_last_layers_unfreeze >= 1:\n            model.layers[-1].trainable = True\n        if n_last_layers_unfreeze >= 2:\n            model.layers[-2].trainable = True\n        if n_last_layers_unfreeze >= 3:\n            for layer in base_model.layers[-(n_last_layers_unfreeze-2):]:\n                layer.trainable = True\n\n    return model\n\n\ndef create_student_model_mobile(shape, augmentation=None, n_last_layers_unfreeze=None):\n    \"\"\"\n    Create the student model (MobileNetV3Small).\n    Args:\n        shape: input shape\n        augmentation: tf.keras.Sequential with transformation layers\n        n_last_layers_unfreeze: number of layers to unfreeze and enable training\n    Return:\n        model: student model \n    \"\"\"\n    base_model = tf.keras.applications.MobileNetV3Small(\n      include_top = True,\n      weights = 'imagenet',\n      input_shape = shape\n    )\n    base_model.trainable = False \n    base_model = tf.keras.Model(inputs=base_model.input, \n                       outputs= base_model.get_layer(index=-2).output)\n\n    inputs = tf.keras.Input(shape=shape)\n    if augmentation is not None:\n        x = augmentation(inputs)\n    else:\n        x = inputs\n    preprocess = tf.keras.applications.mobilenet_v3.preprocess_input(x)\n    x = base_model(preprocess, training = False) \n    output = tf.keras.layers.Dense(2)(x)\n    model = tf.keras.Model(inputs, output)\n\n    if n_last_layers_unfreeze is not None:\n        if n_last_layers_unfreeze >= 1:\n            model.layers[-1].trainable = True\n        if n_last_layers_unfreeze >= 2:\n            for layer in base_model.layers[-(n_last_layers_unfreeze-1):]:\n                layer.trainable = True\n\n    return model\n\n\n\ndef train_model(model_type, \n                train_data,\n                val_data,\n                epochs,\n                learning_rate, \n                batch_size, \n                n_layers_unfreeze, \n                augmentation= None):\n    \"\"\"\n    Train teacher or student model with EarlyStopping and Adam optimizer.\n    \n    Args:\n       model_type: string identifying the model type. Must be \"teacher\" or \"student\".\n       train_data: tuple with training images and labels.\n       val_data: tuple with validation images and labels.\n       epochs: int. Number of epochs to train.\n       learning_rate: float. Optimizer learning rate.\n       batch_size: int. Number of images in each batch.\n       n_last_layers_unfreeze: number of layers to unfreeze and enable training\n       augmentation: tf.keras.Sequential with transformation layers\n    \n    Returns:\n        model: trained model\n        history: training history\n    \"\"\"\n    X_train, y_train = train_data\n    X_val, y_val = val_data\n    ds_train = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(batch_size)\n    ds_val = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(batch_size)\n    \n    if model_type == \"teacher\":\n        model = create_teacher_model(shape= X_train[0].shape,\n                                     augmentation= augmentation, \n                                     n_last_layers_unfreeze= n_layers_unfreeze) \n    elif model_type == 'student':\n        model = create_student_model_mobile(shape= X_train[0].shape, \n                                            augmentation= augmentation,\n                                            n_last_layers_unfreeze= n_layers_unfreeze)\n    else:\n        print(\"Invalid model type!\")\n    callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',\n                                                min_delta=0.001,\n                                                patience=20,\n                                                restore_best_weights=True)\n    \n    model.compile(optimizer= tf.keras.optimizers.Adam(learning_rate= learning_rate),\n                          loss= tf.keras.losses.CategoricalCrossentropy(from_logits=True),\n                          metrics= [BalancedAccuracy()])\n    history = model.fit(ds_train,\n                        epochs= epochs,\n                        callbacks= [callback],\n                        validation_data= ds_val,)\n    \n    return model, history","metadata":{"_uuid":"193274f8-50ce-4272-8b17-8257b94b9e64","_cell_guid":"d75449dc-cf82-4a48-86f8-1f5d4cbef16a","trusted":true,"collapsed":false,"jupyter":{"outputs_hidden":false}},"outputs":[],"execution_count":null}]}
+import tensorflow as tf
+from metrics import BalancedAccuracy
+
+def create_teacher_model(shape, augmentation=None, n_last_layers_unfreeze=None):
+    """
+    Create the teacher model (ResNet50V2).
+    Args:
+        shape: input shape
+        augmentation: tf.keras.Sequential with transformation layers
+        n_last_layers_unfreeze: number of layers to unfreeze and enable training
+    Return:
+        model: teacher model 
+    """
+
+    base_model = tf.keras.applications.ResNet50V2(
+      include_top = False,
+      weights = 'imagenet',
+      input_shape = shape
+    )
+    base_model.trainable = False
+
+    inputs = tf.keras.Input(shape=shape)
+    if augmentation is not None:
+        x = augmentation(inputs)
+    else:
+        x = inputs
+    preprocess = tf.keras.applications.resnet_v2.preprocess_input(x)
+    x = base_model(preprocess, training = False)
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    output = tf.keras.layers.Dense(2)(x)
+    model = tf.keras.Model(inputs, output)
+
+    if n_last_layers_unfreeze is not None:
+        if n_last_layers_unfreeze >= 1:
+            model.layers[-1].trainable = True
+        if n_last_layers_unfreeze >= 2:
+            model.layers[-2].trainable = True
+        if n_last_layers_unfreeze >= 3:
+            for layer in base_model.layers[-(n_last_layers_unfreeze-2):]:
+                layer.trainable = True
+
+    return model
+
+
+def create_student_model_mobile(shape, augmentation=None, n_last_layers_unfreeze=None):
+    """
+    Create the student model (MobileNetV3Small).
+    Args:
+        shape: input shape
+        augmentation: tf.keras.Sequential with transformation layers
+        n_last_layers_unfreeze: number of layers to unfreeze and enable training
+    Return:
+        model: student model 
+    """
+    base_model = tf.keras.applications.MobileNetV3Small(
+      include_top = True,
+      weights = 'imagenet',
+      input_shape = shape
+    )
+    base_model.trainable = False 
+    base_model = tf.keras.Model(inputs=base_model.input, 
+                       outputs= base_model.get_layer(index=-2).output)
+
+    inputs = tf.keras.Input(shape=shape)
+    if augmentation is not None:
+        x = augmentation(inputs)
+    else:
+        x = inputs
+    preprocess = tf.keras.applications.mobilenet_v3.preprocess_input(x)
+    x = base_model(preprocess, training = False) 
+    output = tf.keras.layers.Dense(2)(x)
+    model = tf.keras.Model(inputs, output)
+
+    if n_last_layers_unfreeze is not None:
+        if n_last_layers_unfreeze >= 1:
+            model.layers[-1].trainable = True
+        if n_last_layers_unfreeze >= 2:
+            for layer in base_model.layers[-(n_last_layers_unfreeze-1):]:
+                layer.trainable = True
+
+    return model
+
+
+
+def train_model(model_type, 
+                train_data,
+                val_data,
+                epochs,
+                learning_rate, 
+                batch_size, 
+                n_layers_unfreeze, 
+                augmentation= None):
+    """
+    Train teacher or student model with EarlyStopping and Adam optimizer.
+
+    Args:
+       model_type: string identifying the model type. Must be "teacher" or "student".
+       train_data: tuple with training images and labels.
+       val_data: tuple with validation images and labels.
+       epochs: int. Number of epochs to train.
+       learning_rate: float. Optimizer learning rate.
+       batch_size: int. Number of images in each batch.
+       n_last_layers_unfreeze: number of layers to unfreeze and enable training
+       augmentation: tf.keras.Sequential with transformation layers
+
+    Returns:
+        model: trained model
+        history: training history
+    """
+    X_train, y_train = train_data
+    X_val, y_val = val_data
+    ds_train = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(batch_size)
+    ds_val = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(batch_size)
+
+    if model_type == "teacher":
+        model = create_teacher_model(shape= X_train[0].shape,
+                                     augmentation= augmentation, 
+                                     n_last_layers_unfreeze= n_layers_unfreeze) 
+    elif model_type == 'student':
+        model = create_student_model_mobile(shape= X_train[0].shape, 
+                                            augmentation= augmentation,
+                                            n_last_layers_unfreeze= n_layers_unfreeze)
+    else:
+        print("Invalid model type!")
+    callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                min_delta=0.001,
+                                                patience=20,
+                                                restore_best_weights=True)
+
+    model.compile(optimizer= tf.keras.optimizers.Adam(learning_rate= learning_rate),
+                          loss= tf.keras.losses.CategoricalCrossentropy(from_logits=True),
+                          metrics= [BalancedAccuracy()])
+    history = model.fit(ds_train,
+                        epochs= epochs,
+                        callbacks= [callback],
+                        validation_data= ds_val,)
+
+    return model, history
+

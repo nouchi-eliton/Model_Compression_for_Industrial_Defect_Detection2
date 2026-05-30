@@ -1,1 +1,37 @@
-{"metadata":{"kernelspec":{"language":"python","display_name":"Python 3","name":"python3"},"language_info":{"pygments_lexer":"ipython3","nbconvert_exporter":"python","version":"3.6.4","file_extension":".py","codemirror_mode":{"name":"ipython","version":3},"name":"python","mimetype":"text/x-python"},"kaggle":{"accelerator":"none","dataSources":[],"dockerImageVersionId":31234,"isInternetEnabled":true,"language":"python","sourceType":"script","isGpuEnabled":false}},"nbformat_minor":4,"nbformat":4,"cells":[{"cell_type":"code","source":"import tensorflow as tf\n\nclass BalancedAccuracy(tf.keras.metrics.Metric):\n    def __init__(self, name=\"balanced_accuracy\", **kwargs):\n        super().__init__(name=name, **kwargs)\n        self.true_positives = self.add_weight(name=\"tp\", initializer=\"zeros\")\n        self.false_negatives = self.add_weight(name=\"fn\", initializer=\"zeros\")\n        self.true_negatives = self.add_weight(name=\"tn\", initializer=\"zeros\")\n        self.false_positives = self.add_weight(name=\"fp\", initializer=\"zeros\")\n\n    def update_state(self, y_true, y_pred, sample_weight=None):\n        if y_true.ndim > 1:\n            y_true = tf.argmax(y_true, axis=1)\n        if y_pred.ndim > 1:\n            y_pred = tf.argmax(y_pred, axis=1)\n        \n        tp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 1), tf.equal(y_pred, 1)), tf.float32))\n        fn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 1), tf.equal(y_pred, 0)), tf.float32))\n        tn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 0), tf.equal(y_pred, 0)), tf.float32))\n        fp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 0), tf.equal(y_pred, 1)), tf.float32))\n\n        self.true_positives.assign_add(tp)\n        self.false_negatives.assign_add(fn)\n        self.true_negatives.assign_add(tn)\n        self.false_positives.assign_add(fp)\n\n    def result(self):\n        sensitivity = self.true_positives / (self.true_positives + self.false_negatives + tf.keras.backend.epsilon())\n        specificity = self.true_negatives / (self.true_negatives + self.false_positives + tf.keras.backend.epsilon())\n        return (sensitivity + specificity) / 2\n\n    def reset_state(self):\n        self.true_positives.assign(0)\n        self.false_negatives.assign(0)\n        self.true_negatives.assign(0)\n        self.false_positives.assign(0)\n","metadata":{"_uuid":"3cbc690b-1efe-4c01-bb61-01b4a4349b06","_cell_guid":"02cbf22c-46da-47c1-aed0-bb1a6b7ae1e4","trusted":true,"collapsed":false,"jupyter":{"outputs_hidden":false}},"outputs":[],"execution_count":null}]}
+import tensorflow as tf
+
+class BalancedAccuracy(tf.keras.metrics.Metric):
+    def __init__(self, name="balanced_accuracy", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.true_positives = self.add_weight(name="tp", initializer="zeros")
+        self.false_negatives = self.add_weight(name="fn", initializer="zeros")
+        self.true_negatives = self.add_weight(name="tn", initializer="zeros")
+        self.false_positives = self.add_weight(name="fp", initializer="zeros")
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        if y_true.ndim > 1:
+            y_true = tf.argmax(y_true, axis=1)
+        if y_pred.ndim > 1:
+            y_pred = tf.argmax(y_pred, axis=1)
+
+        tp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 1), tf.equal(y_pred, 1)), tf.float32))
+        fn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 1), tf.equal(y_pred, 0)), tf.float32))
+        tn = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 0), tf.equal(y_pred, 0)), tf.float32))
+        fp = tf.reduce_sum(tf.cast(tf.logical_and(tf.equal(y_true, 0), tf.equal(y_pred, 1)), tf.float32))
+
+        self.true_positives.assign_add(tp)
+        self.false_negatives.assign_add(fn)
+        self.true_negatives.assign_add(tn)
+        self.false_positives.assign_add(fp)
+
+    def result(self):
+        sensitivity = self.true_positives / (self.true_positives + self.false_negatives + tf.keras.backend.epsilon())
+        specificity = self.true_negatives / (self.true_negatives + self.false_positives + tf.keras.backend.epsilon())
+        return (sensitivity + specificity) / 2
+
+    def reset_state(self):
+        self.true_positives.assign(0)
+        self.false_negatives.assign(0)
+        self.true_negatives.assign(0)
+        self.false_positives.assign(0)
+
